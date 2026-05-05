@@ -7,74 +7,89 @@ from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Mental Health Predictor", layout="wide")
 
-# 1. Load and Clean (Cached for speed)
+# 1. Load Data
 @st.cache_data
 def load_data():
-    data = pd.read_csv("student_mental_health.csv", on_bad_lines='skip', engine='python')
-    data.columns = data.columns.str.strip()
-    return data.dropna()
+    try:
+        data = pd.read_csv("student_mental_health.csv", on_bad_lines='skip', engine='python')
+        data.columns = data.columns.str.strip() # Clean names
+        return data.dropna()
+    except Exception as e:
+        st.error(f"Failed to load CSV: {e}")
+        return None
 
 df = load_data()
 
-st.title("🎓 Student Mental Health Predictor")
+if df is not None:
+    st.title("🎓 Student Mental Health Predictor")
 
-# 2. Select Target
-target = st.sidebar.selectbox("🎯 Target Variable", df.columns, index=len(df.columns)-1)
+    # 2. Select Target
+    target = st.sidebar.selectbox("🎯 Select what to predict", df.columns, index=len(df.columns)-1)
 
-# 3. Robust Encoding
-df_encoded = df.copy()
-label_encoders = {}
+    # 3. Robust Encoding Logic
+    df_encoded = df.copy()
+    label_encoders = {}
 
-for col in df_encoded.columns:
-    if df_encoded[col].dtype == 'object':
-        le = LabelEncoder()
-        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
-        label_encoders[col] = le
-
-# 4. Prepare & Train Model (Done once at startup)
-X = df_encoded.drop(columns=[target])
-y = df_encoded[target]
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-model = RandomForestClassifier(n_estimators=100)
-model.fit(X_train, y_train)
-
-# 5. User Input Form (The UI Fix)
-st.subheader("📝 Enter Student Information")
-with st.form("prediction_form"):
-    # Create two columns for a cleaner look
-    cols = st.columns(2)
-    user_input_raw = []
-    
-    for i, col_name in enumerate(X.columns):
-        with cols[i % 2]: # Alternate between columns
-            if col_name in label_encoders:
-                options = list(label_encoders[col_name].classes_)
-                choice = st.selectbox(f"{col_name}", options)
-                user_input_raw.append(label_encoders[col_name].transform([choice])[0])
-            else:
-                avg = float(df[col_name].mean())
-                val = st.number_input(f"{col_name}", value=avg)
-                user_input_raw.append(val)
-    
-    # The Submit Button
-    submit_button = st.form_submit_button(label="Predict Output")
-
-# 6. Logic when Button is Clicked
-if submit_button:
-    # This block ONLY runs when the button is pressed
-    try:
-        prediction_num = model.predict([user_input_raw])[0]
-        
-        # Decode result if it was categorical
-        if target in label_encoders:
-            final_result = label_encoders[target].inverse_transform([int(prediction_num)])[0]
+    for col in df_encoded.columns:
+        # If the column is text OR contains ranges, force it to numeric categories
+        if df_encoded[col].dtype == 'object':
+            le = LabelEncoder()
+            df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
+            label_encoders[col] = le
         else:
-            final_result = f"{prediction_num:.2f}"
+            # Ensure numbers are actually numbers
+            df_encoded[col] = pd.to_numeric(df_encoded[col], errors='coerce').fillna(0)
+
+    # 4. Prepare Features and Model
+    X = df_encoded.drop(columns=[target])
+    y = df_encoded[target]
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    
+    # Attempt to train - if this fails, we show the data types to debug
+    try:
+        model.fit(X_train, y_train)
+    except Exception as e:
+        st.error("🚨 Model Training Error!")
+        st.write("The model found non-numeric data. Here are the types it sees:")
+        st.write(X_train.dtypes)
+        st.stop()
+
+    # 5. The Input Form
+    st.subheader(f"Predicting: {target}")
+    with st.form("main_form"):
+        inputs = []
+        cols = st.columns(2)
+        
+        for i, col_name in enumerate(X.columns):
+            with cols[i % 2]:
+                if col_name in label_encoders:
+                    # Dropdown for category/text columns
+                    options = list(label_encoders[col_name].classes_)
+                    choice = st.selectbox(f"{col_name}", options)
+                    inputs.append(label_encoders[col_name].transform([choice])[0])
+                else:
+                    # Number box for numeric columns
+                    val = st.number_input(f"{col_name}", value=float(df[col_name].mean()))
+                    inputs.append(val)
+        
+        submit = st.form_submit_button("Generate Prediction")
+
+    # 6. Output
+    if submit:
+        prediction = model.predict([inputs])[0]
+        
+        # Convert back to text if it was a category
+        if target in label_encoders:
+            result = label_encoders[target].inverse_transform([int(prediction)])[0]
+        else:
+            result = round(float(prediction), 2)
             
         st.divider()
-        st.balloons() # Visual celebration
-        st.success(f"### Result: The predicted **{target}** is **{final_result}**")
+        st.balloons()
+        st.success(f"### Predicted {target}: **{result}**")
         
-    except Exception as e:
-        st.error(f"Prediction Error: {e}")
+        # Quick Insight
+        st.info("The model used Random Forest logic to determine this result based on your dataset patterns.")
