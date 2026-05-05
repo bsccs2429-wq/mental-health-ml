@@ -12,47 +12,40 @@ from sklearn.ensemble import RandomForestClassifier
 try:
     df = pd.read_csv("student_mental_health.csv", on_bad_lines='skip', engine='python')
     
-    # CRITICAL FIX: Remove hidden spaces from column names
+    # CLEANUP: Remove any leading/trailing spaces from column names
     df.columns = df.columns.str.strip()
     
-    # Drop empty rows and work on a clean copy
+    # Drop rows with missing values
     df = df.dropna().copy()
 except Exception as e:
-    st.error(f"❌ CSV Error: {e}")
+    st.error(f"❌ Error loading CSV: {e}")
     st.stop()
 
 st.title("🎓 Student Mental Health Predictor")
 
 # -------------------------
-# Dataset Preview
-# -------------------------
-st.subheader("Dataset Preview")
-st.write(df.head())
-
-# -------------------------
 # Select Target Column
 # -------------------------
-# Now "study_hours" (without spaces) will be selectable
+# We do this BEFORE encoding so we know what to exclude from X
 target = st.selectbox("Select the column you want to predict", df.columns)
 
 # -------------------------
-# Encode Categorical Data
+# Encode Data
 # -------------------------
 label_encoders = {}
 df_encoded = df.copy()
 
 for col in df_encoded.columns:
-    # Check if column contains text (object)
+    # If the column is text, convert it to numbers
     if df_encoded[col].dtype == 'object':
         le = LabelEncoder()
-        # Convert to string first to be safe, then encode
         df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
         label_encoders[col] = le
 
 # -------------------------
-# Split Data
+# Split Data (The "X" fix)
 # -------------------------
-# We use the ENCODED version for the machine learning model
+# Ensure X ONLY has numeric features and definitely does not have the target
 X = df_encoded.drop(columns=[target])
 y = df_encoded[target]
 
@@ -73,30 +66,26 @@ st.subheader("Enter Values for Prediction")
 user_input = []
 
 for col in X.columns:
-    # If the column was text, show a dropdown menu
+    # If it was originally a text column, show a dropdown
     if col in label_encoders:
         options = list(label_encoders[col].classes_)
-        selected_option = st.selectbox(f"Select {col}", options)
-        # Convert selection back to the number the model expects
-        encoded_val = label_encoders[col].transform([selected_option])[0]
-        user_input.append(encoded_val)
+        selected = st.selectbox(f"Select {col}", options)
+        user_input.append(label_encoders[col].transform([selected])[0])
     else:
-        # For numeric columns, use a number box
-        default_val = float(df[col].mean())
-        val = st.number_input(f"Enter {col}", value=default_val)
-        user_input.append(val)
+        # Otherwise, show a number input
+        avg_val = float(df[col].mean())
+        user_input.append(st.number_input(f"Enter {col}", value=avg_val))
 
 # -------------------------
-# Prediction Logic
+# Prediction
 # -------------------------
 if st.button("Predict"):
-    features = np.array([user_input])
-    prediction = model.predict(features)[0]
-
-    # Convert numeric prediction back to its original name (e.g., "High")
+    prediction = model.predict([user_input])[0]
+    
+    # If the target was a word (like 'Medium'), convert it back
     if target in label_encoders:
         final_result = label_encoders[target].inverse_transform([int(prediction)])[0]
     else:
         final_result = prediction
-
+        
     st.success(f"The predicted **{target}** is: **{final_result}**")
