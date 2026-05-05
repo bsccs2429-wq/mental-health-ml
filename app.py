@@ -7,47 +7,54 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 
 # -------------------------
-# Load Dataset (safe loading)
+# Load Dataset
 # -------------------------
 try:
     df = pd.read_csv("student_mental_health.csv", on_bad_lines='skip', engine='python')
-except:
-    st.error("❌ CSV file not found or broken.")
+    
+    # CRITICAL FIX: Remove hidden spaces from column names
+    df.columns = df.columns.str.strip()
+    
+    # Drop empty rows and work on a clean copy
+    df = df.dropna().copy()
+except Exception as e:
+    st.error(f"❌ CSV Error: {e}")
     st.stop()
 
-# -------------------------
-# Show Data
-# -------------------------
 st.title("🎓 Student Mental Health Predictor")
 
+# -------------------------
+# Dataset Preview
+# -------------------------
 st.subheader("Dataset Preview")
 st.write(df.head())
-
-st.subheader("Columns in Dataset")
-st.write(list(df.columns))
 
 # -------------------------
 # Select Target Column
 # -------------------------
+# Now "study_hours" (without spaces) will be selectable
 target = st.selectbox("Select the column you want to predict", df.columns)
 
 # -------------------------
-# Encode Data
+# Encode Categorical Data
 # -------------------------
-df = df.dropna()
-
 label_encoders = {}
-for col in df.columns:
-    if df[col].dtype == 'object':
+df_encoded = df.copy()
+
+for col in df_encoded.columns:
+    # Check if column contains text (object)
+    if df_encoded[col].dtype == 'object':
         le = LabelEncoder()
-        df[col] = le.fit_transform(df[col])
+        # Convert to string first to be safe, then encode
+        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
         label_encoders[col] = le
 
 # -------------------------
 # Split Data
 # -------------------------
-X = df.drop(target, axis=1)
-y = df[target]
+# We use the ENCODED version for the machine learning model
+X = df_encoded.drop(columns=[target])
+y = df_encoded[target]
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
@@ -60,25 +67,36 @@ model = RandomForestClassifier()
 model.fit(X_train, y_train)
 
 # -------------------------
-# User Input (dynamic)
+# User Input (Dynamic UI)
 # -------------------------
-st.subheader("Enter Values")
-
+st.subheader("Enter Values for Prediction")
 user_input = []
 
 for col in X.columns:
-    val = st.number_input(f"{col}", value=0.0)
-    user_input.append(val)
+    # If the column was text, show a dropdown menu
+    if col in label_encoders:
+        options = list(label_encoders[col].classes_)
+        selected_option = st.selectbox(f"Select {col}", options)
+        # Convert selection back to the number the model expects
+        encoded_val = label_encoders[col].transform([selected_option])[0]
+        user_input.append(encoded_val)
+    else:
+        # For numeric columns, use a number box
+        default_val = float(df[col].mean())
+        val = st.number_input(f"Enter {col}", value=default_val)
+        user_input.append(val)
 
 # -------------------------
-# Prediction
+# Prediction Logic
 # -------------------------
 if st.button("Predict"):
-    user_data = np.array([user_input])
-    prediction = model.predict(user_data)[0]
+    features = np.array([user_input])
+    prediction = model.predict(features)[0]
 
-    # Decode if needed
+    # Convert numeric prediction back to its original name (e.g., "High")
     if target in label_encoders:
-        prediction = label_encoders[target].inverse_transform([prediction])[0]
+        final_result = label_encoders[target].inverse_transform([int(prediction)])[0]
+    else:
+        final_result = prediction
 
-    st.success(f"Prediction: {prediction}")
+    st.success(f"The predicted **{target}** is: **{final_result}**")
