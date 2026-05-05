@@ -1,0 +1,11 @@
+study_hours,sleep_hours,stress_level,gpa,mental_health_risk
+5,7,4,8.0,Low
+8,5,7,6.5,High
+6,6,5,7.2,Medium
+9,4,9,5.8,High
+4,8,3,8.5,Low
+7,6,6,7.0,Medium
+3,9,2,9.0,Low
+10,3,10,5.0,High
+6,7,5,7.5,Medium
+5,8,3,8.8,Low
